@@ -1,12 +1,11 @@
 // We (re)define the structs that are bound to the shader
 // this corresponds to the mapping in the bind groups
-struct Observer {
+struct Camera {
     view_proj: mat4x4<f32>,
-    position: vec4<f32>,
 };
  
 @group(1) @binding(0)
-var<uniform> observer: Observer;
+var<uniform> camera: Camera;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -66,7 +65,7 @@ fn vs_main(
     out.position = world_position.xyz;
 
     // this is the thing that really matters to the clipping and rasterization process
-    out.clip_position = observer.view_proj * world_position;
+    out.clip_position = camera.view_proj * world_position;
     return out;
 }
 
@@ -90,14 +89,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let diffuse_strength = 3.0 * max(dot(in.world_normal, light_dir), 0.0) * distance_factor;
     let diffuse_color = light.color * diffuse_strength;
 
-    let view_dir = normalize(observer.position.xyz - in.position);
-    let reflect = reflect(-light_dir, in.world_normal);
-    let specular_strenght = pow(max(dot(view_dir, reflect), 0.0), 32.0) * distance_factor;
-    let specular_color = specular_strenght * light.color;
-    
     let ambient_strength = 0.001;
     let ambient_color = light.color * ambient_strength;
 
-    let result = (specular_color + ambient_color + diffuse_color) * object_color.xyz;
+    let result = (ambient_color + diffuse_color) * object_color.xyz;
     return vec4<f32>(result, object_color.a);
 }
