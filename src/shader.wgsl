@@ -88,7 +88,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     
     let diffuse_strength = 3.0 * max(dot(in.world_normal, light_dir), 0.0) * distance_factor;
     let diffuse_color = light.color * diffuse_strength;
-
     let ambient_strength = 0.001;
     let ambient_color = light.color * ambient_strength;
 

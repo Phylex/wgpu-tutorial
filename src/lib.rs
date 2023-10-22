@@ -14,7 +14,6 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 0.5, 1.0,
 );
 
-// This is the camera struct
 #[derive(Debug)]
 pub struct Camera {
     // This is the position of the camera in world space
@@ -172,7 +171,7 @@ impl CameraUniform {
             label: Some("observer bind group layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                visibility: wgpu::ShaderStages::VERTEX ,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
