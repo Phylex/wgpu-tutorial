@@ -87,6 +87,9 @@ impl App {
             .unwrap(); 
         // we now set up the surface configuration that we want and then configure
         // the surface
+        // The surface becomes a texture (in the context of wgpu). It is given to a
+        // render pass as color attachement which is where the GPU ends up rendering
+        // things to.
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
@@ -98,6 +101,14 @@ impl App {
         };
         surface.configure(&device, &config);
 
+        // now that we have all the necessary resources to draw to a screen, we can start
+        // to construct various render pipelines and then use those to render stuff to
+        // the screen (or a texture) in a render pass.
+        // 
+        // The main component of a render pipeline are the two shaders. The shaders define
+        // how the render pipeline needs to be layed out. They also define the interpretation
+        // of the data. So as a result, pipelines are really just hand crafted.
+        //
         // This concludes the setup of the device. At this stage we have set up the
         // environment and we start creating the objects that we want to draw on the
         // screen this is 
@@ -111,6 +122,10 @@ impl App {
         // with `data` I mean both shader code as well as textures and 'uniform' data and
         // last but not least the vertex data that is used to describe the geometry in 
         // 3dimensions.
+        //
+        // The thing that I'd like to acheive is to be able to manipulate 3D mesh data that forms
+        // all kinds of different things and have it rendered. This means that this is simply the
+        // rendering part of the app that needs to contain a modeling part as well.
         App {
             window,
             window_size,

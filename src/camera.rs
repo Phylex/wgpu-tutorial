@@ -156,6 +156,10 @@ impl CameraUniform {
 
     // when a new view transform is computed, this sends that new data to the buffer on the GPU
     pub fn update(&mut self, camera_transform: [[f32; 4]; 4], queue: &wgpu::Queue) {
+        // This hides complexity that would otherwise 
+        // be our responsibility. It essentially creates a 'staging buffer'
+        // to which it writes the data and then adds a buffertobuffer copy operation to
+        // the command queue
         queue.write_buffer(
             &self.gpu_buffer,
             0,
@@ -207,7 +211,10 @@ impl CameraUniform {
             // This buffer is the place that the view projection is placed in, so
             // we don't need the
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: true,
+            // a buffer that is mapped at creation will be available as
+            // a memory map on the CPU side to write into. This
+            // means that 
+            mapped_at_creation: false,
         })
     }
 }
