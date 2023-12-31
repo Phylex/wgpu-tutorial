@@ -60,11 +60,13 @@ impl <'a, 'b, 'c> model::DrawMesh<'a, 'b, 'c> for ColoredMeshRenderer {
         instances: std::ops::Range<u32>,
         camera_bind_group: &'c wgpu::BindGroup,
     ) where 'b: 'a, 'c: 'b {
-        let mesh_texture_bind_group = mesh.material.as_ref().clone().unwrap().bind_group.as_ref().unwrap();
         render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
         render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         render_pass.set_bind_group(0, camera_bind_group, &[]);
-        render_pass.set_bind_group(1, mesh_texture_bind_group, &[]);
+        if let Some(material) = &mesh.material {
+            let mesh_texture_bind_group = material.bind_group.as_ref().unwrap();
+            render_pass.set_bind_group(1, mesh_texture_bind_group, &[]);
+        }
         render_pass.draw_indexed(0..mesh.num_elements, 0, instances);
     }
 }

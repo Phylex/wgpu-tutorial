@@ -9,6 +9,7 @@ pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
     let path = std::path::Path::new(env!("OUT_DIR"))
         .join("res")
         .join(file_name);
+    println!("file_name: {:?}", path);
     let txt = std::fs::read_to_string(path)?;
     Ok(txt)
 }
@@ -17,6 +18,7 @@ pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
     let path = std::path::Path::new(env!("OUT_DIR"))
         .join("res")
         .join(file_name);
+    println!("binary file_name: {:?}", path);
     let data = std::fs::read(path)?;
     Ok(data)
 }
@@ -54,29 +56,39 @@ pub async fn load_model(
     ).await?;
 
     let mut materials = Vec::new();
-
-    for m in obj_materials? {
-        // get the texture for that material
-        let mut diffuse_texture = load_texture(&m.diffuse_texture.unwrap_or_else(|| "Some Texture".to_string()), device, queue).await?;
-        diffuse_texture.add_bind_group(device);
-        // create the bind group for a given texture
-        materials.push(Arc::new(diffuse_texture))
+    if let Ok(obj_materials) = obj_materials {
+        for m in obj_materials.iter() {
+            // get the texture for that material
+            if let Some(diffuse_texture) = &m.diffuse_texture {
+                let mut diffuse_texture = load_texture(diffuse_texture, device, queue).await?;
+                diffuse_texture.add_bind_group(device);
+                materials.push(Arc::new(diffuse_texture))
+            }
+        }
     }
 
     let meshes = models.into_iter().map(|m| {
-        let vertices = (0..m.mesh.positions.len() / 3).map(|i| model::RawVertex{
+        // we always load the position of te vertices
+        let mut vertices = (0..m.mesh.positions.len() / 3).map(|i| model::RawVertex{
             pos: [
                 m.mesh.positions[i*3],
                 m.mesh.positions[i*3+1],
                 m.mesh.positions[i*3+2],
             ],
-            tex_ccord: [m.mesh.texcoords[i * 2], m.mesh.texcoords[i * 2 + 1]],
-            norm: [
-                m.mesh.normals[i * 3],
-                m.mesh.normals[i * 3 + 1],
-                m.mesh.normals[i * 3 + 2],
-            ],
+            tex_ccord: [0.0, 0.0],
+            norm: [0.0, 0.0, 0.0],
         }).collect::<Vec<_>>();
+        if m.mesh.texcoords.len() / 2 == m.mesh.positions.len() {
+            for (i, v) in vertices.iter_mut().enumerate() {
+                v.tex_ccord = [m.mesh.texcoords[i * 2], m.mesh.texcoords[i * 2 + 1]];
+            }
+        }
+        if m.mesh.normals.len() / 3 == m.mesh.positions.len() {
+            for (i, v) in vertices.iter_mut().enumerate() {
+                v.norm = [m.mesh.normals[i * 3], m.mesh.normals[i * 3 + 1], m.mesh.normals[i * 3 + 1]];
+            }
+        }
+
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some(&format!("{:?} Vertex Buffer", file_name)),
@@ -88,13 +100,23 @@ pub async fn load_model(
             contents: bytemuck::cast_slice(&m.mesh.indices),
             usage: wgpu::BufferUsages::INDEX,
         });
+        let mesh_material = match m.mesh.material_id {
+            Some(id) => {
+                if materials.len() > id {
+                    Some(materials[id].clone())
+                } else {
+                    None
+                }
+            }
+            None => None,
+        };
 
         model::Mesh {
             name: file_name.to_string(),
             vertex_buffer,
             index_buffer,
             num_elements: m.mesh.indices.len() as u32,
-            material: Some(materials[m.mesh.material_id.unwrap_or(0)].clone()),
+            material: mesh_material,
             fallback_color: [1., 1., 1., 1.].into(),
         }
     }).collect::<Vec<_>>();
