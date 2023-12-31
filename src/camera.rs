@@ -194,10 +194,13 @@ impl Camera {
         screen_height: u32,
         znear: f32,
         zfar: f32,
-        // the camera is tied to it's representation on a GPU
-        // so the device is the GPU it is tied to
-        device: &wgpu::Device,
-        // the update needs to be issued onto a command queue
+        // the uniform is the thing that lives on the GPU
+        // and which holds the final transform matrix of the
+        // camera
+        uniform: Arc<Mutex<CameraUniform>>,
+
+        // we need access to the command queue to write the transformation
+        // matrix of this camera to the gpu memory
         queue: &wgpu::Queue,
     ) -> Self
     where
@@ -220,7 +223,7 @@ impl Camera {
                 zfar,
                 znear,
             ),
-            uniform: Arc::new(Mutex::new(CameraUniform::new(device))),
+            uniform,
             controls: CameraControlls::new(4.0, 0.4),
         };
         // the data in the GPU needs to actually be initialized, so we compute the matrix here and
