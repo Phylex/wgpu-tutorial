@@ -1,12 +1,14 @@
+use std::sync::Arc;
+use core::ops::Range;
 /// Define the data structures and traits that we need to render triangles
 /// onto the screen.
-use image::GenericImageView;
+use image::{GenericImageView, Rgba, ImageBuffer};
 use cgmath::*;
 
 /// The vertex is the thing that is a node in our mesh. It's what we build
 /// meshes out of. In this case the Vertex is simple and it's only job is
 /// to be part of a triangle.
-/// On the computing side of things this will be a lot mode complicated, as
+/// On the computing side of things this will be a lot mode complicated, aso
 /// mesh traversal is not really a thing here.
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
@@ -14,6 +16,34 @@ pub struct Vertex {
     pub position: Vector3<f32>,
     pub texture_coords: Vector2<f32>,
     pub normal: Vector3<f32>,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct RawVertex {
+    pub pos: [f32; 3],
+    pub tex_ccord: [f32; 2],
+    pub norm: [f32; 3],
+}
+
+impl From<Vertex> for RawVertex {
+    fn from(value: Vertex) -> Self {
+        Self {
+            pos: [value.position.x, value.position.y, value.position.z],
+            tex_ccord: [value.texture_coords.x, value.texture_coords.y],
+            norm: [value.normal.x, value.normal.y, value.normal.z]
+        }
+    }
+}
+
+impl From<RawVertex> for Vertex {
+    fn from(value: RawVertex) -> Self {
+        Self {
+            position: value.pos.into(),
+            texture_coords: value.tex_ccord.into(),
+            normal: value.norm.into(),
+        }
+    }
 }
 
 // We need to convert to something that bytemuck can cast so that
@@ -74,7 +104,7 @@ impl Vertex {
 /// -----
 /// Meshes is not used here as meshes in the Simulation environment have a particular meaning
 /// as the simulation domain. Simulation results may then be turned into Surfaces
-pub struct Surface {
+pub struct Mesh {
     pub name: String,
     /// This is where the data for the vertices is stored
     pub vertex_buffer: wgpu::Buffer,
@@ -85,8 +115,25 @@ pub struct Surface {
     /// the index buffer.
     pub index_buffer: wgpu::Buffer,
     pub num_elements: u32,
-    pub fallback_color: Vector3<u8>,
+    pub fallback_color: Vector4<f32>,
+    // this is the index of a material used for this mesh
+    pub material: Option<Arc<Texture>>,
 }
+
+pub trait DrawMesh<'a, 'b, 'c> {
+    fn draw_mesh(
+        render_pass: &'a mut wgpu::RenderPass<'b>,
+        mesh: &'c Mesh,
+        camera_bind_group: &'c wgpu::BindGroup,
+    ) where 'b: 'a, 'c: 'b;
+    fn draw_mesh_instanced(
+        render_pass: &'a mut wgpu::RenderPass<'b>,
+        mesh: &'c Mesh,
+        instances: Range<u32>,
+        camera_bind_group: &'c wgpu::BindGroup,
+    ) where 'b: 'a, 'c: 'b;
+}
+
 
 /**
 To be able to render meshes with fancy images on their surface, we need a texture
@@ -103,29 +150,15 @@ pub struct Texture {
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub sampler: wgpu::Sampler,
+    pub size: wgpu::Extent3d,
+    pub bind_group_layout: Option<wgpu::BindGroupLayout>,
+    pub bind_group: Option<wgpu::BindGroup>,
 }
 
 impl Texture {
     /// the format of the depth texture
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-    /// Create the bind group descriptor to be used when creating the actual bind group
-    fn desc(&self, layout: &wgpu::BindGroupLayout) -> wgpu::BindGroupDescriptor {
-        wgpu::BindGroupDescriptor {
-            label: Some("Texture bind group"),
-            layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&self.view)
-                },
-                 wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler)
-                },
-            ]
-        }
-    }
     /// Provide the Description of the texture on the GPU
     fn desc_layout() -> wgpu::BindGroupLayoutDescriptor<'static> {
         wgpu::BindGroupLayoutDescriptor {
@@ -151,6 +184,18 @@ impl Texture {
         }
     }
 
+    fn desc(label: Option<&str>, size: wgpu::Extent3d) -> wgpu::TextureDescriptor {
+        wgpu::TextureDescriptor {
+            label,
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        }
+    }
     /// Create the bind group layout on the GPU. The layout needs to be known to the GPU driver
     ///
     /// Notes
@@ -167,27 +212,52 @@ impl Texture {
     /// -----
     /// The caller must make sure that this function is called with the bind group layout
     /// acquired by calling the create layout 
-    pub fn create_bind_group(&self, device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> wgpu::BindGroup {
-        device.create_bind_group(&self.desc(layout))
+    pub fn create_bind_group(name: &str, view: &wgpu::TextureView, sampler: &wgpu::Sampler, device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> wgpu::BindGroup {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&(name.to_owned() + "bind Group")),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(view)
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler)
+                },
+            ]
+        })
     }
 
-
-    /// Create both the bind group and the layout.
-    ///
-    /// Notes
-    /// -----
-    /// The layout can be reused for BindGroups of other instances of a Texture 
-    pub fn create_bind_group_with_layout(&self, device: &wgpu::Device) -> (wgpu::BindGroupLayout, wgpu::BindGroup) {
+    pub fn update_gpu_texture(&self, queue: &wgpu::Queue, data: &ImageBuffer<Rgba<u8>, Vec<u8>>) {
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                aspect: wgpu::TextureAspect::All,
+                texture: &self.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+            },
+            data,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * self.size.width),
+                rows_per_image: Some(self.size.height),
+            },
+            self.size,
+        );
+    }
+    
+    pub fn add_bind_group(&mut self, device: &wgpu::Device) {
         let layout = device.create_bind_group_layout(&Texture::desc_layout());
-        let bind_group = device.create_bind_group(&self.desc(&layout));
-        return (layout, bind_group)
+        let bind_group = Texture::create_bind_group(&self.name, &self.view, &self.sampler, device, &layout);
+        self.bind_group = Some(bind_group);
+        self.bind_group_layout = Some(layout);
 
     }
 
     /// load an image from bytes in memory
     #[allow(dead_code)]
     pub fn from_bytes(
-        name: String,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         bytes: &[u8],
@@ -206,22 +276,19 @@ impl Texture {
     ) -> anyhow::Result<Self> {
         let rgba = img.to_rgba8();
         let dimensions = img.dimensions();
-        let size = wgpu::Extent3d{
+        let size = wgpu::Extent3d {
             width: dimensions.0,
             height: dimensions.1,
             depth_or_array_layers: 1,
         };
+
         // create the texture and the sampler
-        let texture = device.create_texture(&wgpu::TextureDescriptor{
-            label: Some(label),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let texture = device.create_texture(
+            &Texture::desc(
+                Some(label),
+                size.clone()
+            )
+        );
         queue.write_texture(
             wgpu::ImageCopyTexture {
                 aspect: wgpu::TextureAspect::All,
@@ -247,7 +314,9 @@ impl Texture {
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
-        Ok(Self{ name: label.to_string(), texture, view, sampler})
+        let layout = Texture::create_layout(&device);
+        let bind_group = Some(Texture::create_bind_group(label, &view, &sampler, device, &layout));
+        Ok(Self{ size, name: label.to_string(), texture, view, sampler, bind_group_layout: Some(layout), bind_group})
     }
     
     /// create a depth texture
@@ -287,7 +356,7 @@ impl Texture {
                 ..Default::default()
             }
         );
-        Self { name: label.to_string(), texture, view, sampler }
+        Self { size, name: label.to_string(), texture, view, sampler, bind_group_layout: None, bind_group: None}
     }
 }
 
@@ -296,6 +365,5 @@ impl Texture {
 /// with textures (one for each mesh)
 pub struct Object {
     pub name: String,
-    pub surfaces: Surface,
-    pub texture: Texture,
+    pub meshes: Vec<Mesh>,
 }

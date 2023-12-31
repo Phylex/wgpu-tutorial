@@ -5,12 +5,11 @@ struct Camera {
     view_proj: mat4x4<f32>,
 };
  
-@group(1) @binding(0)
+@group(0) @binding(0)
 var<uniform> camera: Camera;
 
 struct VertexInput {
     @location(0) position: vec4<f32>,
-    @location(1) color: vec4<f32>,
 };
 
 struct VertexOutput {
@@ -23,7 +22,7 @@ struct InstanceInput {
     @location(6) transform_matrix_1: vec4<f32>,
     @location(7) transform_matrix_2: vec4<f32>,
     @location(8) transform_matrix_3: vec4<f32>,
-    @location(9) scale: vec4<f32>,
+    @location(9) color: vec4<f32>,
 };
 
 // Here the vertex shader is doing pretty boring stuff, it simply maps the points into the view volume
@@ -43,16 +42,17 @@ fn vs_main(
     var out: VertexOutput;
     
     // simply transform the point on the grid according to the instance transform
-    var instanced_position: vec4<f32> = instance_transform * vec4<f32>(model.position, 1.0);
+    var instanced_position = instance_transform * model.position;
 
     // this is the thing that really matters to the clipping and rasterization process
-    out.clip_position = camera.view_proj * instanced_position.xyz;
-    out.color = model.color;
+    out.clip_position = camera.view_proj * instanced_position;
+    out.color = instance.color;
     return out;
 }
 
 // The fragment shader is really straight forward, as we essentially do no light calculations what so ever
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    //return vec4<f32>(0., 1., 1., 1.);
     return in.color;
 }

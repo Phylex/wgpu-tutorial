@@ -1,8 +1,14 @@
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::f32::consts::FRAC_PI_2;
+
 // This import allows us to use the useful definitions from cgmath
 // The e.g. define a function to construct the view transformation
 // matrix
 use cgmath::*;
-
+use winit::{
+    event::{DeviceEvent, ElementState, MouseScrollDelta, VirtualKeyCode, WindowEvent},
+};
 // This is a transform between different reference frames. This is due to
 // differing standard coordinate frames in openGL and WebGPU. the cgmath
 // package thinks in the openGL reference frame and wgpu in the WebGPU frame
@@ -13,6 +19,140 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
     0.0, 0.0, 0.5, 0.0,
     0.0, 0.0, 0.5, 1.0,
 );
+
+const SAFE_FRAC_PI_2: f32 = FRAC_PI_2 - 0.0001;
+
+/// The ObserverControlls are the user interface to an observer it allows the user to
+/// move the observer around and look at different objects in the scene/world
+#[derive(Debug)]
+pub struct CameraControlls {
+    amount_left: f32,
+    amount_right: f32,
+    amount_forward: f32,
+    amount_backward: f32,
+    amount_up: f32,
+    amount_down: f32,
+    rotate_horizontal: f32,
+    rotate_vertical: f32,
+    scroll: f32,
+    speed: f32,
+    sensitivity: f32,
+    mouse_pressed: bool,
+}
+
+impl CameraControlls {
+    pub fn new(speed: f32, sensitivity: f32) -> Self {
+        Self {
+            amount_left: 0.0,
+            amount_right: 0.0,
+            amount_forward: 0.0,
+            amount_backward: 0.0,
+            amount_up: 0.0,
+            amount_down: 0.0,
+            rotate_horizontal: 0.0,
+            rotate_vertical: 0.0,
+            scroll: 0.0,
+            speed,
+            sensitivity,
+            mouse_pressed: false,
+        }
+    }
+    pub fn on_keyboard_input(&mut self, input: &winit::event::KeyboardInput) -> bool {
+        let amount: f32 = if input.state == ElementState::Pressed {
+            1.0
+        } else {
+            0.0
+        };
+        if let Some(keycode) = input.virtual_keycode {
+            match keycode {
+                VirtualKeyCode::R | VirtualKeyCode::Up => {
+                    self.amount_forward = amount;
+                    true
+                }
+                VirtualKeyCode::H | VirtualKeyCode::Down => {
+                    self.amount_backward = amount;
+                    true
+                }
+                VirtualKeyCode::S | VirtualKeyCode::Left => {
+                    self.amount_left = amount;
+                    true
+                }
+                VirtualKeyCode::T | VirtualKeyCode::Right => {
+                    self.amount_right = amount;
+                    true
+                }
+                VirtualKeyCode::Space => {
+                    self.amount_up = amount;
+                    true
+                }
+                VirtualKeyCode::LShift => {
+                    self.amount_down = amount;
+                    true
+                }
+                _ => false,
+            }
+        } else {
+            false
+        }
+    }
+
+    pub fn on_cursor_moved(&mut self, delta: &(f64, f64)) -> bool {
+        if self.mouse_pressed {
+            self.rotate_horizontal = delta.0 as f32;
+            self.rotate_vertical = delta.1 as f32;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Process the mouse wheel input and indicate if it has been processed
+    pub fn on_mouse_wheel(&mut self, delta: &winit::event::MouseScrollDelta) -> bool {
+        self.scroll = match delta {
+            MouseScrollDelta::LineDelta(_, scroll) => scroll * 100.0,
+            MouseScrollDelta::PixelDelta(winit::dpi::PhysicalPosition { y: scroll, .. }) => {
+                *scroll as f32
+            }
+        };
+        // currently all mouse wheel input is processed so we always return true
+        true
+    }
+
+    /// Process the mouse button input. Currently we want to pan the camera if
+    /// the left mouse button is pressed, we don't care about anything else for now
+    /// also indicate if it has been processed
+    pub fn on_mouse_button_input(
+        &mut self,
+        state: &winit::event::ElementState,
+        button: &winit::event::MouseButton,
+    ) -> bool {
+        match button {
+            winit::event::MouseButton::Left => {
+                self.mouse_pressed = *state == winit::event::ElementState::Pressed;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn on_device_event(&mut self, event: &DeviceEvent) -> bool {
+        match event {
+            DeviceEvent::MouseMotion { delta, .. } => self.on_cursor_moved(delta),
+            _ => false,
+        }
+    }
+
+    pub fn on_window_event(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            WindowEvent::KeyboardInput { input, .. } => self.on_keyboard_input(input),
+            WindowEvent::MouseWheel { delta, .. } => self.on_mouse_wheel(delta),
+            WindowEvent::MouseInput { state, button, .. } => {
+                self.on_mouse_button_input(&state, &button)
+            }
+            _ => false,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct Camera {
@@ -37,7 +177,8 @@ pub struct Camera {
     // seldomly so we store it instead of recomputing it each time we
     // update the GPU uniform
     perspective: Matrix4<f32>,
-    uniform: CameraUniform,
+    pub uniform: Arc<Mutex<CameraUniform>>,
+    pub controls: CameraControlls,
 }
 
 // This is the struct that contains all the information to define
@@ -65,7 +206,7 @@ impl Camera {
         Y: Into<Rad<f32>>,
         F: Into<Rad<f32>> + Copy,
     {
-        let mut cam = Camera {
+        let cam = Camera {
             position: position.into(),
             pitch: pitch.into(),
             yaw: yaw.into(),
@@ -79,12 +220,15 @@ impl Camera {
                 zfar,
                 znear,
             ),
-            uniform: CameraUniform::new(device),
+            uniform: Arc::new(Mutex::new(CameraUniform::new(device))),
+            controls: CameraControlls::new(4.0, 0.4),
         };
         // the data in the GPU needs to actually be initialized, so we compute the matrix here and
         // then send it to the GPU
-        cam.uniform
-            .update((cam.perspective * cam.compute_view_matrix()).into(), queue);
+        {
+            let mut uniform = cam.uniform.lock().unwrap();
+            uniform.update(cam.compute_full_camera_transform(), queue);
+        }
         cam
     }
     // This is the matrix that distorts the world to emulate the 'lens' of the camera
@@ -130,6 +274,54 @@ impl Camera {
         self.perspective =
             Self::compute_projection_matrix(field_of_view, aspect_ratio, znear, zfar);
     }
+
+    pub fn resize(&mut self, screen_width: u32, screen_height: u32) {
+        self.aspect_ratio = screen_width as f32 / screen_height as f32;
+        self.set_perspective(self.field_of_view, self.aspect_ratio, self.znear, self.zfar)
+    }
+
+    /// Take the input of the controls and update the state of the camera transform matrix
+    pub fn update(&mut self, dt: std::time::Duration) {
+        let dt = dt.as_secs_f32();
+
+        // process the moving around part of the camera
+        let (yaw_sin, yaw_cos) = self.yaw.sin_cos();
+        let (pitch_sin, pitch_cos) = self.pitch.sin_cos();
+        let forward = Vector3::new(yaw_cos, pitch_sin, yaw_sin).normalize();
+        let right = Vector3::new(-yaw_sin, 0.0, yaw_cos).normalize();
+        self.position += forward * (self.controls.amount_forward - self.controls.amount_backward) * self.controls.speed * dt;
+        self.position += right * (self.controls.amount_right - self.controls.amount_left) * self.controls.speed * dt;
+        self.position += Vector3::unit_y() * (self.controls.amount_up - self.controls.amount_down) * self.controls.speed * dt;
+
+        // process the scrolling motion and then reset it so that we don't scroll to
+        // infinity
+        let scrollward = Vector3::new(pitch_cos * yaw_cos, pitch_sin, pitch_cos * yaw_sin).normalize();
+        self.position += scrollward * self.controls.scroll * self.controls.speed * self.controls.sensitivity * dt;
+        self.controls.scroll = 0.;
+
+        // update the view direction and then reset the control amount;
+        self.yaw += Rad(self.controls.rotate_horizontal) * self.controls.sensitivity * dt;
+        self.pitch += Rad(-self.controls.rotate_vertical) * self.controls.sensitivity * dt;
+        self.controls.rotate_horizontal = 0.0;
+        self.controls.rotate_vertical = 0.0;
+
+        // limit the maximum and minimum pitch so we dont get gimball lock
+        if self.pitch < -Rad(SAFE_FRAC_PI_2) {
+            self.pitch = -Rad(SAFE_FRAC_PI_2);
+        } else if self.pitch > Rad(SAFE_FRAC_PI_2) {
+            self.pitch = Rad(SAFE_FRAC_PI_2);
+        }
+    }
+
+    /// Compute the transform matrix that goes into the CameraUniform
+    pub fn compute_full_camera_transform(&self) -> [[f32; 4]; 4] {
+        (self.perspective * self.compute_view_matrix()).into()
+    }
+
+    
+    pub fn update_uniform(&self, queue: &wgpu::Queue) {
+        self.uniform.lock().unwrap().update(self.compute_full_camera_transform(), queue)
+    }
 }
 
 /// Struct that holds all data that is related to the representation of the Camera on the GPU
@@ -156,7 +348,7 @@ impl CameraUniform {
 
     // when a new view transform is computed, this sends that new data to the buffer on the GPU
     pub fn update(&mut self, camera_transform: [[f32; 4]; 4], queue: &wgpu::Queue) {
-        // This hides complexity that would otherwise 
+        // This hides complexity that would otherwise
         // be our responsibility. It essentially creates a 'staging buffer'
         // to which it writes the data and then adds a buffertobuffer copy operation to
         // the command queue
@@ -166,16 +358,13 @@ impl CameraUniform {
             bytemuck::cast_slice(&[camera_transform]),
         );
     }
-    // The following are helper functions to define the things that are needed on the GPU side for
-    // everything to work
 
-    /// Build the structure of the bind group from this function and regester it with the device
-    fn create_gpu_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("observer bind group layout"),
+    pub fn describe() -> wgpu::BindGroupLayoutDescriptor<'static> {
+        wgpu::BindGroupLayoutDescriptor {
+            label: Some("Camera bind group"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX ,
+                visibility: wgpu::ShaderStages::VERTEX,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
@@ -183,7 +372,15 @@ impl CameraUniform {
                 },
                 count: None,
             }],
-        })
+        }
+    }
+
+    // The following are helper functions to define the things that are needed on the GPU side for
+    // everything to work
+
+    /// Build the structure of the bind group from this function and regester it with the device
+    fn create_gpu_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&CameraUniform::describe())
     }
 
     // actually create the bind group (the thing that is accessable from the shader) and put the
@@ -213,7 +410,7 @@ impl CameraUniform {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             // a buffer that is mapped at creation will be available as
             // a memory map on the CPU side to write into. This
-            // means that 
+            // means that
             mapped_at_creation: false,
         })
     }

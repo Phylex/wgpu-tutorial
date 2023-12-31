@@ -1,3 +1,5 @@
+use cgmath::{Vector3, Matrix4, Vector4, Quaternion};
+
 /// The indexing that works for Vertices also kinda works for whole meshes.
 /// This allows us to easily (and while only using an additional 16 numbers) to
 /// create multiple copies (or instances) of the same mesh, without
@@ -11,6 +13,7 @@
 /// The other approach (which is used here) is to have the GPU pass the
 /// instance matrix as a kind of Vertex attribute. With this approach the
 /// GPU driver manages the distribution of the memory to the shader invocations.
+
 pub struct Instance {
     /// define the position in the world that the mesh needs to be moved to
     pub position: Vector3<f32>,
@@ -19,35 +22,48 @@ pub struct Instance {
     pub rotation: Quaternion<f32>,
     /// this allows us to grow/shrink our the instances of our mesh
     pub scale: Vector3<f32>,
+    /// for our colored mesh renderer, we need the color of the mesh
+    pub color: Vector4<f32>,
 }
 
 
 impl Instance {
     /// turn the data in our shader struct into a matrix in homogenious
     /// coordinates
-    pub fn compute_instance_matrix(&self) -> [[f32; 4]; 4] {
-        let scale_matrix: Matrix4<f32> = Matrix4::<f32>::new(
-            self.scale.x, 0.0, 0.0, 0.0,
-            0.0, self.scale.y, 0.0, 0.0,
-            0.0, 0.0, self.scale.z, 0.0,
-            0.0, 0.0,          0.0, 1.0);
-        (Matrix4::<f32>::from_translation(self.position) *
-        (scale_matrix *
-         Matrix4::<f32>::from(self.rotation))).into()
+    pub fn compute_instance_matrix(&self) -> [[f32; 4]; 5] {
+        let buffer_content: [[f32; 4]; 4] = (
+            Matrix4::<f32>::new(
+                self.scale.x, 0.0, 0.0, 0.0,
+                0.0, self.scale.y, 0.0, 0.0,
+                0.0, 0.0, self.scale.z, 0.0,
+                0.0, 0.0,          0.0, 1.0)  *
+            Matrix4::<f32>::from_translation(self.position) *
+            Matrix4::<f32>::from(self.rotation)).into();
+        let color: [f32; 4] = self.color.into();
+        {
+            let mut whole = [[0.0; 4]; 5];
+            let (left, right) = whole.split_at_mut(buffer_content.len());
+            left.copy_from_slice(&buffer_content);
+            right.copy_from_slice(&[color]);
+            whole
+        }
     }
 
     /// we need the buffer layout for this at one point so we encode it here
     /// as part of the instance implementation (its the equivalent of a static
     /// method)
-    pub fn describe_layout<'a>() -> wgpu::VertexBufferLayout<'a> {
+    pub fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
                 use std::mem;
         wgpu::VertexBufferLayout {
-            // we know that the instance transform matrix will bbe 
-            array_stride: mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress,
+            // we know the size of the instance transform matrix, and then we add the size of the
+            // rgba color to the total size
+            array_stride: (mem::size_of::<[[f32; 4]; 4]>() + mem::size_of::<Vector4<u8>>()) as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
             // So the 4x4 matrix needs to be split into vectors (as we can't describe
             // matrices as vertex attributes, so we split the matrix into 4 vectors
             attributes: &[
+                // the four vectors that together make up the transformation matrix for the
+                // instance
                 wgpu::VertexAttribute {
                     offset: 0,
                     shader_location: 5,
@@ -66,6 +82,13 @@ impl Instance {
                 wgpu::VertexAttribute {
                     offset: mem::size_of::<[f32; 12]>() as wgpu::BufferAddress,
                     shader_location: 8,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                // the color encoded as 4 integers in the CPU and coverted to 4 floats [0,1] (rgba)
+                // in the shader
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 16]>() as wgpu::BufferAddress,
+                    shader_location: 9,
                     format: wgpu::VertexFormat::Float32x4,
                 },
             ],
