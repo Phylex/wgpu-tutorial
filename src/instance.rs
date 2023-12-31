@@ -24,21 +24,26 @@ pub struct Instance {
     pub scale: Vector3<f32>,
     /// for our colored mesh renderer, we need the color of the mesh
     pub color: Vector4<f32>,
+
+    pub buffer: Arc<Mutex<wgpu::Buffer>>,
+    
+    pub buffer_index: usize,
 }
 
+pub type RawInstance = [[f32;4];5];
 
 impl Instance {
     /// turn the data in our shader struct into a matrix in homogenious
     /// coordinates
-    pub fn compute_instance_matrix(&self) -> [[f32; 4]; 5] {
+    pub fn compute_instance_matrix(&self) -> RawInstance {
         let buffer_content: [[f32; 4]; 4] = (
+            Matrix4::<f32>::from_translation(self.position) *
+            Matrix4::<f32>::from(self.rotation) *
             Matrix4::<f32>::new(
                 self.scale.x, 0.0, 0.0, 0.0,
                 0.0, self.scale.y, 0.0, 0.0,
                 0.0, 0.0, self.scale.z, 0.0,
-                0.0, 0.0,          0.0, 1.0)  *
-            Matrix4::<f32>::from_translation(self.position) *
-            Matrix4::<f32>::from(self.rotation)).into();
+                0.0, 0.0,          0.0, 1.0)).into();
         let color: [f32; 4] = self.color.into();
         {
             let mut whole = [[0.0; 4]; 5];
@@ -49,6 +54,16 @@ impl Instance {
         }
     }
 
+    /// rotate the instance by the given quaternion
+    pub fn rotate(&mut self, rotation: Quaternion<f32>) {
+        self.rotation = self.rotation * rotation;
+    }
+
+    /// translate the instance along the given vector
+    pub fn translate(&mut self, translation: Vector3<f32>) {
+        self.position += translation
+    }
+    
     /// we need the buffer layout for this at one point so we encode it here
     /// as part of the instance implementation (its the equivalent of a static
     /// method)
@@ -93,5 +108,17 @@ impl Instance {
                 },
             ],
         }
+    }
+}
+
+/// many instances share the same buffer
+pub struct InstanceBuffer<T> {
+    cpu_buffer: Vec<T>,
+    gpu_buffer: wgpu::Buffer,
+    gpu_buffer_size: usize,
+}
+
+impl InstanceBuffer<T> {
+    pub fn new() -> Self {
     }
 }

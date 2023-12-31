@@ -6,6 +6,7 @@ use cgmath;
 use colored_mesh_renderer::ColoredMeshRenderer;
 use model::DrawMesh;
 use renderer::DescribeRenderPipeline;
+use ui::UI;
 use wgpu::util::DeviceExt;
 use winit::{
     event::*,
@@ -22,6 +23,7 @@ mod renderer;
 mod instance;
 mod colored_mesh_renderer;
 mod resources;
+mod ui;
 
 // We need a place to put the objects/data related to the global state into
 struct App {
@@ -62,10 +64,7 @@ struct App {
     objects: Vec<model::Object>,
 
     // this is all the egui stuff we need to have a UI visible
-    ui_context: egui::Context,
-    ui_painter: egui_wgpu::renderer::Renderer,
-    ui_state: egui_winit::State,
-    ui_screen_descriptor: egui_wgpu::renderer::ScreenDescriptor,
+    ui: UI,
     instance_buffer: wgpu::Buffer,
     model_instance: instance::Instance,
 }
@@ -206,21 +205,13 @@ impl App {
         // now that we have set up our own pipeline, we need to set up the pipeline that draws to
         // to the ui to the screen this is somewhat important as we need the UI to do control the
         // rendering
-        let ui_context = egui::Context::default();
-        let ui_state = egui_winit::State::new(
-            ui_context.viewport_id(),
-            &window,
-            Some(window.scale_factor() as f32),
-            None
-        );
-        let ui_renderer = egui_wgpu::renderer::Renderer::new(&device, surface_format, Some(model::Texture::DEPTH_FORMAT), 1);
-        let ui_screen_descriptor = egui_wgpu::renderer::ScreenDescriptor{ size_in_pixels: [config.width, config.height], pixels_per_point: 2. };
+        let ui = UI::new(&window, &device, surface_format, model::Texture::DEPTH_FORMAT, config.width, config.height);
 
         let initial_object = resources::load_model("teapot.obj", &device, &queue).await.unwrap();
 
         let model_instance = instance::Instance {
             position: [0., 0., 0.].into(), 
-            rotation: cgmath::Quaternion::from_sv(0.0, cgmath::Vector3::unit_z()),
+            rotation: cgmath::Quaternion::from_sv(0., cgmath::Vector3::unit_x()),
             scale: [1.0, 1.0, 1.0].into(),
             color: [1., 0., 1., 1.].into()};
         let instance_data = model_instance.compute_instance_matrix();
@@ -228,11 +219,10 @@ impl App {
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Instance Buffer"),
                 contents: bytemuck::cast_slice(&instance_data),
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_WRITE,
             }
         );
             
-        let global_camera = camera.uniform.clone();
         App {
             window,
             window_size,
@@ -246,10 +236,7 @@ impl App {
             cameras: vec![camera],
             camera_uniform,
             objects: vec![initial_object],
-            ui_context,
-            ui_painter: ui_renderer,
-            ui_screen_descriptor,
-            ui_state,
+            ui,
             active_camera: 0,
             surface_config: config,
             model_instance,
@@ -361,7 +348,7 @@ impl App {
         match event {
             Event::WindowEvent { window_id, event, .. } if *window_id == self.window.id() => {
                 // let the ui handle the input
-                let resp = self.ui_state.on_window_event(&self.ui_context, event);
+                let resp = self.ui.state.on_window_event(&self.ui_context, event);
                 // pass the input to the camera for it to process stuff
                 let processed = if !resp.consumed {
                     self.cameras[self.active_camera].controls.on_window_event(event)
