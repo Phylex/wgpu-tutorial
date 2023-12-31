@@ -1,6 +1,7 @@
 use std::{time::{Instant, Duration}, sync::{Mutex, Arc}, ops::Deref};
 use std::iter;
 
+use camera::CameraUniform;
 use cgmath;
 use colored_mesh_renderer::ColoredMeshRenderer;
 use model::DrawMesh;
@@ -176,16 +177,17 @@ impl App {
         // so we instaltiate a camera, the camera does not include the buffer in the GPU, that is
         // the CameraUniform which is separate. We can however write the content to the Camera
         // Uniform, this allows us to have multiple cameras, but only one buffer on the GPU.
+        let camera_uniform = Arc::new(Mutex::new(CameraUniform::new(&device)));
         let camera = camera::Camera::new(
-            (0.0, 0.0, 0.0),
+            (1.0, 0.0, 0.0),
             cgmath::Deg(-20.0),
             cgmath::Deg(-90.0),
-            cgmath::Deg(90.0),
+            cgmath::Deg(45.0),
             window_size.width,
             window_size.height,
             0.1,
             100.0,
-            &device,
+            camera_uniform.clone(),
             &queue
         );
 
@@ -214,7 +216,7 @@ impl App {
         let ui_renderer = egui_wgpu::renderer::Renderer::new(&device, surface_format, Some(model::Texture::DEPTH_FORMAT), 1);
         let ui_screen_descriptor = egui_wgpu::renderer::ScreenDescriptor{ size_in_pixels: [config.width, config.height], pixels_per_point: 2. };
 
-        let initial_object = resources::load_model("cube.obj", &device, &queue).await.unwrap();
+        let initial_object = resources::load_model("teapot.obj", &device, &queue).await.unwrap();
 
         let model_instance = instance::Instance {
             position: [0., 0., 0.].into(), 
@@ -242,7 +244,7 @@ impl App {
             depth_texture,
             render_pipeline: color_render_pipeline,
             cameras: vec![camera],
-            camera_uniform: global_camera,
+            camera_uniform,
             objects: vec![initial_object],
             ui_context,
             ui_painter: ui_renderer,
