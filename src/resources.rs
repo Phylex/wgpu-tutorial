@@ -90,16 +90,6 @@ pub async fn load_model(
         }
 
 
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
-            label: Some(&format!("{:?} Vertex Buffer", file_name)),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("{:?} Index Buffer", file_name)),
-            contents: bytemuck::cast_slice(&m.mesh.indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
         let mesh_material = match m.mesh.material_id {
             Some(id) => {
                 if materials.len() > id {
@@ -111,14 +101,7 @@ pub async fn load_model(
             None => None,
         };
 
-        model::Mesh {
-            name: file_name.to_string(),
-            vertex_buffer,
-            index_buffer,
-            num_elements: m.mesh.indices.len() as u32,
-            material: mesh_material,
-            fallback_color: [1., 1., 1., 1.].into(),
-        }
+        model::Surface::new(file_name.to_string(), &vertices, &m.mesh.indices[..], mesh_material, device)
     }).collect::<Vec<_>>();
     Ok(model::Object { 
         name: "SomeObject".to_string(),
