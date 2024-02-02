@@ -3,6 +3,7 @@ use wgpu::RenderPipelineDescriptor;
 
 // This renderer depends on the data structures as defined in the model and instance 
 use crate::{renderer, model, instance};
+use std::mem;
 
 impl renderer::DescribeRenderPipeline for ColoredMeshRenderer {
     fn describe_color_attachment(view: Option<&wgpu::TextureView>) -> Option<wgpu::RenderPassColorAttachment> {
@@ -48,7 +49,7 @@ impl renderer::DescribeRenderPipeline for ColoredMeshRenderer {
 impl <'a, 'b, 'c> model::DrawMesh<'a, 'b, 'c> for ColoredMeshRenderer {
     fn draw_mesh (
         render_pass: &'a mut wgpu::RenderPass<'b>,
-        mesh: &'c model::Mesh,
+        mesh: &'c model::Surface,
         camera_bind_group: &'c wgpu::BindGroup,
     ) where 'b: 'a, 'c: 'b {
         ColoredMeshRenderer::draw_mesh_instanced(render_pass, mesh, 0..1, camera_bind_group); 
@@ -56,18 +57,20 @@ impl <'a, 'b, 'c> model::DrawMesh<'a, 'b, 'c> for ColoredMeshRenderer {
 
     fn draw_mesh_instanced(
         render_pass: &'a mut wgpu::RenderPass<'b>,
-        mesh: &'c model::Mesh,
+        mesh: &'c model::Surface,
         instances: std::ops::Range<u32>,
         camera_bind_group: &'c wgpu::BindGroup,
     ) where 'b: 'a, 'c: 'b {
+        let occ_slots = mesh.instance_buffer.occupied_slots;
         render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+        render_pass.set_vertex_buffer(1, mesh.instance_buffer.gpu_buffer.slice(..occ_slots * mem::size_of::<instance::RawInstance>() as u64));
         render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         render_pass.set_bind_group(0, camera_bind_group, &[]);
         if let Some(material) = &mesh.material {
             let mesh_texture_bind_group = material.bind_group.as_ref().unwrap();
             render_pass.set_bind_group(1, mesh_texture_bind_group, &[]);
         }
-        render_pass.draw_indexed(0..mesh.num_elements, 0, instances);
+        render_pass.draw_indexed(0..mesh.num_elements, 0, 0..occ_slots as u32);
     }
 }
 

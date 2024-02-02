@@ -6,7 +6,6 @@ use cgmath;
 use colored_mesh_renderer::ColoredMeshRenderer;
 use model::DrawMesh;
 use renderer::DescribeRenderPipeline;
-use wgpu::util::DeviceExt;
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
@@ -66,8 +65,6 @@ struct App {
     ui_painter: egui_wgpu::renderer::Renderer,
     ui_state: egui_winit::State,
     ui_screen_descriptor: egui_wgpu::renderer::ScreenDescriptor,
-    instance_buffer: wgpu::Buffer,
-    model_instance: instance::Instance,
 }
 
 impl App {
@@ -217,22 +214,6 @@ impl App {
         let ui_screen_descriptor = egui_wgpu::renderer::ScreenDescriptor{ size_in_pixels: [config.width, config.height], pixels_per_point: 2. };
 
         let initial_object = resources::load_model("teapot.obj", &device, &queue).await.unwrap();
-
-        let model_instance = instance::Instance {
-            position: [0., 0., 0.].into(), 
-            rotation: cgmath::Quaternion::from_sv(0.0, cgmath::Vector3::unit_z()),
-            scale: [1.0, 1.0, 1.0].into(),
-            color: [1., 0., 1., 1.].into()};
-        let instance_data = model_instance.compute_instance_matrix();
-        let instance_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Instance Buffer"),
-                contents: bytemuck::cast_slice(&instance_data),
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            }
-        );
-            
-        let global_camera = camera.uniform.clone();
         App {
             window,
             window_size,
@@ -252,8 +233,6 @@ impl App {
             ui_state,
             active_camera: 0,
             surface_config: config,
-            model_instance,
-            instance_buffer,
         }
     }
 
@@ -308,15 +287,21 @@ impl App {
         let ui_input = self.ui_state.take_egui_input(&self.window);
         let ui_output = self.ui_context.run(ui_input, |ctx| {
             egui::Window::new("Color Controls").show(&ctx, |ui| {
+                let cur_mesh = &mut self.objects[0].meshes[0];
+                let mut cur_inst_buf = &mut cur_mesh.instance_buffer;
                 ui.label("Hello world!");
                 if ui.button("Change Color").clicked() {
-                    if self.model_instance.color.x == 1. {
-                        self.model_instance.color.x = 0.;
+                    if cur_mesh.instances[0].color.x == 1. {
+                        cur_mesh.instances[0].color.x = 0.;
+                        cur_mesh.instances[0].update(&mut cur_inst_buf);
                     } else {
-                        self.model_instance.color.x = 1.;
+                        cur_mesh.instances[0].update(&mut cur_inst_buf);
+                        cur_mesh.instances[0].color.x = 1. 
                     }
                 }
-                self.queue.write_buffer(&self.instance_buffer, 0, &bytemuck::cast_slice(&self.model_instance.compute_instance_matrix()));
+                // now we need to update the buffer
+                cur_inst_buf.flush(&self.device, &self.queue);
+                //self.queue.write_buffer(&self.instance_buffer, 0, &bytemuck::cast_slice(&self.model_instance.compute_instance_matrix()));
             });
         });
         self.ui_state.handle_platform_output(&self.window, &self.ui_context, ui_output.platform_output);
@@ -336,7 +321,6 @@ impl App {
         {
             let mut render_pass = encoder.begin_render_pass(&ColoredMeshRenderer::describe_render_pass(&color_attachment, depth_stencil_attachment));
             render_pass.set_pipeline(&self.render_pipeline.pipeline);
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             for obj in self.objects.iter() {
                 for mesh in obj.meshes.iter() {
                     ColoredMeshRenderer::draw_mesh(&mut render_pass, mesh, &camera_uniform.deref().bind_group);
