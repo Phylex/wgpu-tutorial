@@ -29,9 +29,9 @@ pub struct Instance {
     pub scale: Vector3<f32>,
     /// for our colored mesh renderer, we need the color of the mesh
     pub color: Vector4<f32>,
-
-    pub buffer: Arc<Mutex<InstanceBuffer>>,
-    
+    // we only store a reference to the index of the instance buffer here
+    // as it is owned by the same struct that owns tis struct, so that
+    // we can have proper lifetimes when we start to render things.
     pub buffer_index: Rc<usize>,
 }
 
@@ -39,20 +39,34 @@ pub type RawInstance = [[f32;4];5];
 
 impl Instance {
     /// Create a new instance given a new instance buffer
-    pub fn new(ibuf: Arc<Mutex<InstanceBuffer>>) -> Self {
-        let bi = ibuf.lock().unwrap().get_instance_buffer_slot();
+    pub fn new(buffer_index: Rc<usize>) -> Self {
         Self {
             position: Vector3{ x: 0.0, y: 0.0, z: 0.0 },
-            rotation: Quaternion { v: Vector3 { x: 0.0, y: 0.0, z: 1.0 }, s: 0.0 },
+            rotation: Quaternion { v: Vector3::unit_z(), s: 0.0 },
             scale: Vector3 { x: 1.0, y: 1.0, z: 1.0 },
             color: Vector4 { x: 0.0, y: 1.0, z: 0.0, w: 1.0 },
-            buffer: ibuf,
-            buffer_index: bi,
+            buffer_index,
+        }
+    }
+
+    pub fn init(
+        position: Vector3<f32>,
+        rotation: Quaternion<f32>,
+        scale: Vector3<f32>,
+        color: Vector4<f32>,
+        buffer_index: Rc<usize>
+    ) -> Self {
+        Self {
+            position,
+            rotation,
+            scale,
+            color,
+            buffer_index,
         }
     }
     /// turn the data in our shader struct into a matrix in homogenious
     /// coordinates
-    pub fn compute_instance_matrix(&self) -> RawInstance {
+    fn compute_instance_matrix(&self) -> RawInstance {
         let buffer_content: [[f32; 4]; 4] = (
             Matrix4::<f32>::from_translation(self.position) *
             Matrix4::<f32>::from(self.rotation) *
@@ -71,6 +85,11 @@ impl Instance {
         }
     }
 
+    pub fn update(&mut self, gpu_buffer: &mut InstanceBuffer) {
+        let im = self.compute_instance_matrix();
+        gpu_buffer.set_data(*self.buffer_index, im)
+    }
+
     /// rotate the instance by the given quaternion
     pub fn rotate(&mut self, rotation: Quaternion<f32>) {
         self.rotation = self.rotation * rotation;
@@ -85,7 +104,6 @@ impl Instance {
     /// as part of the instance implementation (its the equivalent of a static
     /// method)
     pub fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
-                use std::mem;
         wgpu::VertexBufferLayout {
             // we know te size of the instance transform matrix, and then we add the size of the
             // rgba color to the total size
@@ -133,10 +151,10 @@ impl Instance {
 /// so instance buffers will not be terribly large so we can keep a copy on the cpu side
 pub struct InstanceBuffer {
     cpu_copy: Vec<RawInstance>,
-    gpu_buffer: wgpu::Buffer,
+    pub gpu_buffer: wgpu::Buffer,
     gpu_buffer_size: usize,
     handles: Vec<Weak<usize>>,
-    occupied_slots: usize,
+    pub occupied_slots: u64,
     changed: bool
 }
 
@@ -146,7 +164,7 @@ impl InstanceBuffer {
             cpu_copy: Vec::new(),
             handles: Vec::new(),
             gpu_buffer: Self::create_new_buffer_with_size(buffer_size_in_elems, device),
-            gpu_buffer_size: 10,
+            gpu_buffer_size: buffer_size_in_elems,
             occupied_slots: 0,
             changed: false,
         }
@@ -172,7 +190,7 @@ impl InstanceBuffer {
         let mut free_slot = self.handles.len();
         for (i, h) in self.handles.iter().enumerate() {
             match h.upgrade() {
-                Some(ocidx) => continue,
+                Some(_) => continue,
                 None => { free_slot = i; break; }
             }
         }
@@ -185,13 +203,16 @@ impl InstanceBuffer {
             self.cpu_copy.push(RawInstance::default());
         }
         self.changed = true;
-        Rc::new(lowest_free_index)
+        let nbf = Rc::new(lowest_free_index);
+        self.handles.push(Rc::<usize>::downgrade(&nbf));
+        self.occupied_slots += 1;
+        nbf
         
     }
 
-    pub fn set_data(&mut self, instance: &Instance) {
+    pub fn set_data(&mut self, index: usize, data: RawInstance) {
         self.changed = true;
-        self.cpu_copy[*instance.buffer_index] = instance.compute_instance_matrix();
+        self.cpu_copy[index] = data;
     }
 
     /// all the interaction between the cpu and gpu happens here, when the cpu managed buffer
@@ -202,17 +223,21 @@ impl InstanceBuffer {
             return
         }
         // if by any chance the CPU buffer is bigger than the GPU buffer, resize the GPU buffer
+        println!("{} cpu copy len", self.cpu_copy.len());
         if self.cpu_copy.len() >= self.gpu_buffer_size {
+            println!("inside array expansion func");
             self.gpu_buffer_size = self.gpu_buffer_size * 2;
             self.gpu_buffer = Self::create_new_buffer_with_size(self.gpu_buffer_size, device) 
         }
         // get all the slots that actually have data and fill them into a contiguous buffer
         let occupied_indices = self.get_occupied_slots();
-        self.occupied_slots = occupied_indices.len();
+        println!("{} occupied_slots len", occupied_indices.len());
+        self.occupied_slots = occupied_indices.len() as u64;
         let mut contiguous_instance_buffer: Vec<RawInstance> = vec![RawInstance::default(); self.gpu_buffer_size];
         for (i, &cpu_buf_idx) in  occupied_indices.iter().enumerate() {
             contiguous_instance_buffer[i] = self.cpu_copy[cpu_buf_idx];
         }
+        println!("{} stored gpu_buffer size", self.gpu_buffer_size);
         queue.write_buffer(&self.gpu_buffer, 0, bytemuck::cast_slice(&contiguous_instance_buffer));
         self.changed = false;
     }
