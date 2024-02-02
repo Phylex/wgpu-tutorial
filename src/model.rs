@@ -1,9 +1,13 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use core::ops::Range;
+use wgpu::util::DeviceExt;
+
 /// Define the data structures and traits that we need to render triangles
 /// onto the screen.
 use image::{GenericImageView, Rgba, ImageBuffer};
 use cgmath::*;
+
+use crate::instance;
 
 /// The vertex is the thing that is a node in our mesh. It's what we build
 /// meshes out of. In this case the Vertex is simple and it's only job is
@@ -100,11 +104,7 @@ impl Vertex {
 /// also known as Mesh. A Surface consists of a list of vertices together with other vertex
 /// attributes like normals or texture coordinates
 /// 
-/// Notes
-/// -----
-/// Meshes is not used here as meshes in the Simulation environment have a particular meaning
-/// as the simulation domain. Simulation results may then be turned into Surfaces
-pub struct Mesh {
+pub struct Surface {
     pub name: String,
     /// This is where the data for the vertices is stored
     pub vertex_buffer: wgpu::Buffer,
@@ -116,19 +116,82 @@ pub struct Mesh {
     pub index_buffer: wgpu::Buffer,
     pub num_elements: u32,
     pub fallback_color: Vector4<f32>,
+    pub instances: Vec<instance::Instance>,
+    pub instance_buffer: instance::InstanceBuffer,
     // this is the index of a material used for this mesh
     pub material: Option<Arc<Texture>>,
+}
+
+impl Surface {
+    pub fn new(
+        name: String,
+        vertices: &[RawVertex],
+        indices: &[u32],
+        material: Option<Arc<Texture>>,
+        device: &wgpu::Device,
+    ) -> Self {
+        let mut instbuf = instance::InstanceBuffer::new(&device, 5);
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+            label: Some(&format!("{:?} Vertex Buffer", name)),
+            contents: bytemuck::cast_slice(vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("{:?} Index Buffer", name)),
+            contents: bytemuck::cast_slice(indices),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+        let first_instance = instance::Instance::new(instbuf.get_instance_buffer_slot());
+        let instances = vec![first_instance];
+        Self {
+            name,
+            vertex_buffer,
+            index_buffer,
+            num_elements: indices.len() as u32,
+            material,
+            fallback_color: [0., 1., 0., 1.].into(),
+            instance_buffer: instbuf,
+            instances
+        }
+    }
+
+    pub fn create_instance(
+        &mut self,
+        position: Vector3<f32>, 
+        rotation: Quaternion<f32>,
+        scale: Vector3<f32>,
+        // todo change to proper color space definition
+        color: Vector4<f32>,
+    ) {
+        self.instances.push(
+            instance::Instance::init(
+                position,
+                rotation,
+                scale,
+                color,
+                self.instance_buffer.get_instance_buffer_slot(),
+            )
+        );
+    }
+
+    pub fn update_vertex_buffer(&mut self, vertices: &[RawVertex], queue: &wgpu::Queue) {
+        queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(vertices));
+    }
+
+    pub fn update_index_buffer(&mut self, indices: &[usize], queue: &wgpu::Queue) {
+        queue.write_buffer(&self.index_buffer, 0, bytemuck::cast_slice(indices));
+    }
 }
 
 pub trait DrawMesh<'a, 'b, 'c> {
     fn draw_mesh(
         render_pass: &'a mut wgpu::RenderPass<'b>,
-        mesh: &'c Mesh,
+        mesh: &'c Surface,
         camera_bind_group: &'c wgpu::BindGroup,
     ) where 'b: 'a, 'c: 'b;
     fn draw_mesh_instanced(
         render_pass: &'a mut wgpu::RenderPass<'b>,
-        mesh: &'c Mesh,
+        mesh: &'c Surface,
         instances: Range<u32>,
         camera_bind_group: &'c wgpu::BindGroup,
     ) where 'b: 'a, 'c: 'b;
@@ -365,5 +428,21 @@ impl Texture {
 /// with textures (one for each mesh)
 pub struct Object {
     pub name: String,
-    pub meshes: Vec<Mesh>,
+    pub meshes: Vec<Surface>,
+}
+
+impl Object {
+    pub fn new(name: String) -> Self { 
+        Self {
+            name,
+            meshes: Vec::new(),
+        }
+    }
+
+    pub fn translate(&mut self, dx: Vector3<f32>) {
+
+    }
+
+    pub fn move_instance(&mut self, dx: Vector3<f32>, id: usize) {
+    }
 }
