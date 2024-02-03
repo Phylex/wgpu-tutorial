@@ -101,7 +101,7 @@ pub async fn load_model(
             None => None,
         };
 
-        model::Surface::new(file_name.to_string(), &vertices, &m.mesh.indices[..], mesh_material, device)
+        model::Surface::new(file_name.to_string(), &vertices, &m.mesh.indices[..], mesh_material, device, queue)
     }).collect::<Vec<_>>();
     Ok(model::Object { 
         name: "SomeObject".to_string(),

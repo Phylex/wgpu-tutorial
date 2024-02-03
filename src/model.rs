@@ -129,6 +129,7 @@ impl Surface {
         indices: &[u32],
         material: Option<Arc<Texture>>,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
     ) -> Self {
         let mut instbuf = instance::InstanceBuffer::new(&device, 5);
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
@@ -141,7 +142,9 @@ impl Surface {
             contents: bytemuck::cast_slice(indices),
             usage: wgpu::BufferUsages::INDEX,
         });
-        let first_instance = instance::Instance::new(instbuf.get_instance_buffer_slot());
+        let mut first_instance = instance::Instance::new(instbuf.get_instance_buffer_slot());
+        first_instance.update(&mut instbuf);
+        instbuf.flush(device, queue);
         let instances = vec![first_instance];
         Self {
             name,

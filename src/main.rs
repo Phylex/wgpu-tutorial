@@ -22,6 +22,7 @@ mod instance;
 mod colored_mesh_renderer;
 mod resources;
 
+
 // We need a place to put the objects/data related to the global state into
 struct App {
     window: Window, // The winit Window
@@ -287,21 +288,23 @@ impl App {
         let ui_input = self.ui_state.take_egui_input(&self.window);
         let ui_output = self.ui_context.run(ui_input, |ctx| {
             egui::Window::new("Color Controls").show(&ctx, |ui| {
-                let cur_mesh = &mut self.objects[0].meshes[0];
-                let mut cur_inst_buf = &mut cur_mesh.instance_buffer;
                 ui.label("Hello world!");
                 if ui.button("Change Color").clicked() {
-                    if cur_mesh.instances[0].color.x == 1. {
-                        cur_mesh.instances[0].color.x = 0.;
-                        cur_mesh.instances[0].update(&mut cur_inst_buf);
-                    } else {
-                        cur_mesh.instances[0].update(&mut cur_inst_buf);
-                        cur_mesh.instances[0].color.x = 1. 
+                    for object in self.objects.iter_mut() {
+                        for mesh in object.meshes.iter_mut() {
+                            let mut inst_buf = &mut mesh.instance_buffer;
+                            for instance in mesh.instances.iter_mut() {
+                                if instance.color.z == 1. {
+                                    instance.color.z = 0.;
+                                } else {
+                                    instance.color.z = 1.;
+                                }
+                                instance.update(inst_buf);
+                            }
+                            inst_buf.flush(&self.device, &self.queue)
+                        }
                     }
                 }
-                // now we need to update the buffer
-                cur_inst_buf.flush(&self.device, &self.queue);
-                //self.queue.write_buffer(&self.instance_buffer, 0, &bytemuck::cast_slice(&self.model_instance.compute_instance_matrix()));
             });
         });
         self.ui_state.handle_platform_output(&self.window, &self.ui_context, ui_output.platform_output);
