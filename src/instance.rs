@@ -223,21 +223,17 @@ impl InstanceBuffer {
             return
         }
         // if by any chance the CPU buffer is bigger than the GPU buffer, resize the GPU buffer
-        println!("{} cpu copy len", self.cpu_copy.len());
         if self.cpu_copy.len() >= self.gpu_buffer_size {
-            println!("inside array expansion func");
             self.gpu_buffer_size = self.gpu_buffer_size * 2;
             self.gpu_buffer = Self::create_new_buffer_with_size(self.gpu_buffer_size, device) 
         }
         // get all the slots that actually have data and fill them into a contiguous buffer
         let occupied_indices = self.get_occupied_slots();
-        println!("{} occupied_slots len", occupied_indices.len());
         self.occupied_slots = occupied_indices.len() as u64;
         let mut contiguous_instance_buffer: Vec<RawInstance> = vec![RawInstance::default(); self.gpu_buffer_size];
         for (i, &cpu_buf_idx) in  occupied_indices.iter().enumerate() {
             contiguous_instance_buffer[i] = self.cpu_copy[cpu_buf_idx];
         }
-        println!("{} stored gpu_buffer size", self.gpu_buffer_size);
         queue.write_buffer(&self.gpu_buffer, 0, bytemuck::cast_slice(&contiguous_instance_buffer));
         self.changed = false;
     }
