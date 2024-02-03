@@ -295,7 +295,7 @@ impl App {
                 if ui.button("Change Color").clicked() {
                     for object in self.objects.iter_mut() {
                         for mesh in object.meshes.iter_mut() {
-                            let mut inst_buf = &mut mesh.instance_buffer;
+                            let inst_buf = &mut mesh.instance_buffer;
                             for instance in mesh.instances.iter_mut() {
                                 if instance.color.z == 1. {
                                     instance.color.z = 0.;
@@ -304,8 +304,13 @@ impl App {
                                 }
                                 instance.update(inst_buf);
                             }
-                            inst_buf.flush(&self.device, &self.queue)
                         }
+                    }
+                }
+                for object in self.objects.iter_mut() {
+                    for mesh in object.meshes.iter_mut() {
+                        mesh.build_ui(ui);
+                        mesh.instance_buffer.flush(&self.device, &self.queue)
                     }
                 }
             });

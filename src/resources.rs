@@ -1,6 +1,5 @@
 use std::io::{BufReader, Cursor};
 
-use wgpu::util::DeviceExt;
 use std::sync::Arc;
 
 use crate::model;
@@ -67,7 +66,7 @@ pub async fn load_model(
         }
     }
 
-    let meshes = models.into_iter().map(|m| {
+    let meshes = models.into_iter().enumerate().map(|(o, m)| {
         // we always load the position of te vertices
         let mut vertices = (0..m.mesh.positions.len() / 3).map(|i| model::RawVertex{
             pos: [
@@ -101,7 +100,7 @@ pub async fn load_model(
             None => None,
         };
 
-        model::Surface::new(file_name.to_string(), &vertices, &m.mesh.indices[..], mesh_material, device, queue)
+        model::Surface::new(format!("{} surface no {}", file_name.to_string(), o), &vertices, &m.mesh.indices[..], mesh_material, device, queue)
     }).collect::<Vec<_>>();
     Ok(model::Object { 
         name: "SomeObject".to_string(),

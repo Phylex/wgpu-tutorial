@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use core::ops::Range;
 use wgpu::util::DeviceExt;
 
@@ -175,6 +175,16 @@ impl Surface {
                 self.instance_buffer.get_instance_buffer_slot(),
             )
         );
+    }
+
+    pub fn build_ui(&mut self, ui: &mut egui::Ui) {
+        ui.label(format!("Surface Properties: {}", self.name));
+        for (i, instance) in self.instances.iter_mut().enumerate() {
+            ui.collapsing(format!("Instance {} of {}", i, self.name), |ui| {
+                instance.build_ui(ui);
+            });
+            instance.update(&mut self.instance_buffer)
+        }
     }
 
     pub fn update_vertex_buffer(&mut self, vertices: &[RawVertex], queue: &wgpu::Queue) {

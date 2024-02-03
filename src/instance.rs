@@ -1,8 +1,6 @@
 use cgmath::{Vector3, Matrix4, Vector4, Quaternion};
 use std::rc::{Rc, Weak};
 use std::mem;
-use std::sync::Arc;
-use std::sync::Mutex;
 use wgpu;
 
 /// The indexing that works for Vertices also kinda works for whole meshes.
@@ -143,6 +141,12 @@ impl Instance {
                 },
             ],
         }
+    }
+
+    pub fn build_ui(&mut self, ui: &mut egui::Ui) {
+        ui.add(egui::Slider::new(&mut self.position.x, -5.0..=5.).text("position x"));
+        ui.add(egui::Slider::new(&mut self.position.y, -5.0..=5.).text("position y"));
+        ui.add(egui::Slider::new(&mut self.position.z, -5.0..=5.).text("position z"));
     }
 }
 
