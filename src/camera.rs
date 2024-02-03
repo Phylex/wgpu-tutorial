@@ -7,7 +7,8 @@ use std::f32::consts::FRAC_PI_2;
 // matrix
 use cgmath::*;
 use winit::{
-    event::{DeviceEvent, ElementState, MouseScrollDelta, VirtualKeyCode, WindowEvent},
+    event::{DeviceEvent, ElementState, MouseScrollDelta, WindowEvent},
+    keyboard::{PhysicalKey, KeyCode}
 };
 // This is a transform between different reference frames. This is due to
 // differing standard coordinate frames in openGL and WebGPU. the cgmath
@@ -57,42 +58,43 @@ impl CameraControlls {
             mouse_pressed: false,
         }
     }
-    pub fn on_keyboard_input(&mut self, input: &winit::event::KeyboardInput) -> bool {
+    pub fn on_keyboard_input(&mut self, input: &winit::event::KeyEvent) -> bool {
         let amount: f32 = if input.state == ElementState::Pressed {
             1.0
         } else {
             0.0
         };
-        if let Some(keycode) = input.virtual_keycode {
-            match keycode {
-                VirtualKeyCode::R | VirtualKeyCode::Up => {
-                    self.amount_forward = amount;
-                    true
+        match input.physical_key {
+            PhysicalKey::Code(code) => {
+                match code {
+                    KeyCode::KeyR | KeyCode::ArrowUp => {
+                        self.amount_forward = amount;
+                        true
+                    }
+                    KeyCode::KeyH | KeyCode::ArrowDown => {
+                        self.amount_backward = amount;
+                        true
+                    }
+                    KeyCode::KeyS | KeyCode::ArrowLeft => {
+                        self.amount_left = amount;
+                        true
+                    }
+                    KeyCode::KeyT | KeyCode::ArrowRight => {
+                        self.amount_right = amount;
+                        true
+                    }
+                    KeyCode::Space => {
+                        self.amount_up = amount;
+                        true
+                    }
+                    KeyCode::ShiftLeft => {
+                        self.amount_down = amount;
+                        true
+                    }
+                    _ => false,
                 }
-                VirtualKeyCode::H | VirtualKeyCode::Down => {
-                    self.amount_backward = amount;
-                    true
-                }
-                VirtualKeyCode::S | VirtualKeyCode::Left => {
-                    self.amount_left = amount;
-                    true
-                }
-                VirtualKeyCode::T | VirtualKeyCode::Right => {
-                    self.amount_right = amount;
-                    true
-                }
-                VirtualKeyCode::Space => {
-                    self.amount_up = amount;
-                    true
-                }
-                VirtualKeyCode::LShift => {
-                    self.amount_down = amount;
-                    true
-                }
-                _ => false,
             }
-        } else {
-            false
+            PhysicalKey::Unidentified(_) => false,
         }
     }
 
@@ -144,7 +146,7 @@ impl CameraControlls {
 
     pub fn on_window_event(&mut self, event: &WindowEvent) -> bool {
         match event {
-            WindowEvent::KeyboardInput { input, .. } => self.on_keyboard_input(input),
+            WindowEvent::KeyboardInput { event, .. } => self.on_keyboard_input(event),
             WindowEvent::MouseWheel { delta, .. } => self.on_mouse_wheel(delta),
             WindowEvent::MouseInput { state, button, .. } => {
                 self.on_mouse_button_input(&state, &button)

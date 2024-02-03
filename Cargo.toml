@@ -9,16 +9,16 @@ edition = "2021"
 anyhow = "1.0.75"
 bytemuck = {version = "1.14.0", features = ["derive"]}
 cgmath = "0.18.0"
-egui = "0.24.1"
-egui-wgpu = {version = "0.24.1", features = ["winit"]}
-egui-winit = "0.24.1"
+egui = "0.25"
+egui-wgpu = {version = "0.25", features = ["winit"]}
+egui-winit = "0.25"
 env_logger = "0.10.0"
 image = "0.24.7"
 log = "0.4.20"
 pollster = "0.3.0"
 tobj = {version = "4.0.0", features = ["async"]}
 wgpu = "0.18"
-winit = "0.28.7"
+winit = "0.29.4"
 
 [build-dependencies]
 anyhow = "1.0"

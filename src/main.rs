@@ -8,8 +8,9 @@ use model::DrawMesh;
 use renderer::DescribeRenderPipeline;
 use winit::{
     event::*,
-    event_loop::{ControlFlow, EventLoop},
-    window::{WindowBuilder, Window}, dpi::PhysicalSize,
+    event_loop::EventLoop,
+    keyboard::PhysicalKey,
+    window::{WindowBuilder, Window}, dpi::PhysicalSize, keyboard::KeyCode,
 };
 use egui_winit;
 use egui_wgpu;
@@ -205,11 +206,13 @@ impl App {
         // to the ui to the screen this is somewhat important as we need the UI to do control the
         // rendering
         let ui_context = egui::Context::default();
+        let viewport_id = ui_context.viewport_id();
         let ui_state = egui_winit::State::new(
-            ui_context.viewport_id(),
+            ui_context.clone(),
+            viewport_id,
             &window,
             Some(window.scale_factor() as f32),
-            None
+            None,
         );
         let ui_renderer = egui_wgpu::renderer::Renderer::new(&device, surface_format, Some(model::Texture::DEPTH_FORMAT), 1);
         let ui_screen_descriptor = egui_wgpu::renderer::ScreenDescriptor{ size_in_pixels: [config.width, config.height], pixels_per_point: 2. };
@@ -307,7 +310,7 @@ impl App {
                 }
             });
         });
-        self.ui_state.handle_platform_output(&self.window, &self.ui_context, ui_output.platform_output);
+        self.ui_state.handle_platform_output(&self.window, ui_output.platform_output);
         let ui_primitives = self.ui_context.tessellate(ui_output.shapes, ui_output.pixels_per_point);
 
         // prepare all the buffers and such
@@ -344,11 +347,11 @@ impl App {
         self.cameras[self.active_camera].update_uniform(&self.queue);
     }
     
-    fn on_event(&mut self, event: &Event<()>, control_flow: &mut ControlFlow, last_render_time: &mut Instant) {
+    fn on_event(&mut self, event: &Event<()>, ewlt: &winit::event_loop::EventLoopWindowTarget<()>, last_render_time: &mut Instant) {
         match event {
             Event::WindowEvent { window_id, event, .. } if *window_id == self.window.id() => {
                 // let the ui handle the input
-                let resp = self.ui_state.on_window_event(&self.ui_context, event);
+                let resp = self.ui_state.on_window_event(&self.window, event);
                 // pass the input to the camera for it to process stuff
                 let processed = if !resp.consumed {
                     self.cameras[self.active_camera].controls.on_window_event(event)
@@ -359,20 +362,35 @@ impl App {
                     match event {
                         WindowEvent::CloseRequested
                         | WindowEvent::KeyboardInput {
-                            input:
-                                KeyboardInput {
+                            event:
+                                KeyEvent {
                                     state: ElementState::Pressed,
-                                    virtual_keycode: Some(VirtualKeyCode::Escape),
+                                    physical_key: PhysicalKey::Code(KeyCode::Escape),
                                     ..
                                 },
                             ..
-                        } => *control_flow = ControlFlow::Exit,
+                        } => ewlt.exit(),
                         WindowEvent::Resized(physical_size) => {
                             self.resize(*physical_size);
                         }
-                        WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                        WindowEvent::ScaleFactorChanged { .. } => {
                             // new_inner_size is &mut so w have to dereference it twice
-                            self.resize(**new_inner_size);
+                            self.resize(self.window.inner_size());
+                        }
+                        WindowEvent::RedrawRequested => {
+                            let now = Instant::now();
+                            let dt = now - last_render_time.clone();
+                            *last_render_time = now;
+                            self.update(dt);
+                            match self.render() {
+                                Ok(_) => {}
+                                // Reconfigure the surface if it's lost or outdated
+                                Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => self.resize(self.window_size),
+                                // The system is out of memory, we should probably quit
+                                Err(wgpu::SurfaceError::OutOfMemory) => ewlt.exit(),
+                                // We're ignoring timeouts
+                                Err(wgpu::SurfaceError::Timeout) => log::warn!("Surface timeout"),
+                            }
                         }
                         _ => {}
                     }
@@ -381,22 +399,7 @@ impl App {
             Event::DeviceEvent { event, .. } => {
                 _ = self.cameras[self.active_camera].controls.on_device_event(&event);
             },
-            Event::RedrawRequested(window_id) if *window_id == self.window.id() => {
-                let now = Instant::now();
-                let dt = now - last_render_time.clone();
-                *last_render_time = now;
-                self.update(dt);
-                match self.render() {
-                    Ok(_) => {}
-                    // Reconfigure the surface if it's lost or outdated
-                    Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => self.resize(self.window_size),
-                    // The system is out of memory, we should probably quit
-                    Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
-                    // We're ignoring timeouts
-                    Err(wgpu::SurfaceError::Timeout) => log::warn!("Surface timeout"),
-                }
-            }
-            Event::MainEventsCleared => {
+            Event::AboutToWait => {
                 // RedrawRequested will only trigger once, unless we manually
                 // request it.
                 self.window.request_redraw();
@@ -414,12 +417,12 @@ async fn run() {
     // like button presses and mouse movements/clicks from the window,
     // as well as provide us with a mechanism to draw the our output on
     // the screen
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoop::new().unwrap();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
     let mut app = App::new(window).await;
     let mut now = Instant::now();
-    event_loop.run(move |event, _, control_flow| {
-        app.on_event(&event, control_flow, &mut now)
+    let _ = event_loop.run(move |event, ewlt| {
+        app.on_event(&event, ewlt, &mut now)
     });
 }
 
