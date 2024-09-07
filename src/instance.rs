@@ -62,6 +62,7 @@ impl Instance {
             buffer_index,
         }
     }
+
     /// turn the data in our shader struct into a matrix in homogenious
     /// coordinates
     fn compute_instance_matrix(&self) -> RawInstance {
@@ -211,7 +212,6 @@ impl InstanceBuffer {
         self.handles.push(Rc::<usize>::downgrade(&nbf));
         self.occupied_slots += 1;
         nbf
-        
     }
 
     pub fn set_data(&mut self, index: usize, data: RawInstance) {
