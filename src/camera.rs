@@ -199,7 +199,7 @@ impl Camera {
         // the uniform is the thing that lives on the GPU
         // and which holds the final transform matrix of the
         // camera
-        uniform: Arc<Mutex<CameraUniform>>,
+        device: &wgpu::Device,
 
         // we need access to the command queue to write the transformation
         // matrix of this camera to the gpu memory
@@ -211,6 +211,7 @@ impl Camera {
         Y: Into<Rad<f32>>,
         F: Into<Rad<f32>> + Copy,
     {
+        let uniform = Arc::new(Mutex::new(CameraUniform::new(&device)));
         let cam = Camera {
             position: position.into(),
             pitch: pitch.into(),

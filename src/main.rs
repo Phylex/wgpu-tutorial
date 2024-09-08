@@ -1,7 +1,6 @@
-use std::{time::{Instant, Duration}, sync::{Mutex, Arc}, ops::Deref};
+use std::time::{Instant, Duration};
 use std::iter;
 
-use camera::CameraUniform;
 use cgmath;
 use colored_mesh_renderer::ColoredMeshRenderer;
 use model::DrawMesh;
@@ -50,8 +49,6 @@ struct App {
 
     //camera structs 
     cameras: Vec<camera::Camera>,
-    // uniform
-    camera_uniform: Arc<Mutex<camera::CameraUniform>>,
 
     // active camera
     active_camera: usize,
@@ -176,7 +173,6 @@ impl App {
         // so we instaltiate a camera, the camera does not include the buffer in the GPU, that is
         // the CameraUniform which is separate. We can however write the content to the Camera
         // Uniform, this allows us to have multiple cameras, but only one buffer on the GPU.
-        let camera_uniform = Arc::new(Mutex::new(CameraUniform::new(&device)));
         let camera = camera::Camera::new(
             (1.0, 0.0, 0.0),
             cgmath::Deg(-20.0),
@@ -186,7 +182,7 @@ impl App {
             window_size.height,
             0.1,
             100.0,
-            camera_uniform.clone(),
+            &device,
             &queue
         );
 
@@ -229,7 +225,6 @@ impl App {
             depth_texture,
             render_pipeline: color_render_pipeline,
             cameras: vec![camera],
-            camera_uniform,
             objects: vec![initial_object],
             ui_context,
             ui_painter: ui_renderer,
@@ -283,7 +278,7 @@ impl App {
         // this collects all the operations we want the GPU to perform. It is sent as a batch to
         // the GPU to be processed
         let depth_texture_view = &mut self.depth_texture.view;
-        let camera_uniform = self.camera_uniform.lock().unwrap();
+        let camera_uniform = self.cameras[self.active_camera].uniform.lock().unwrap();
         let color_attachment = [ColoredMeshRenderer::describe_color_attachment(Some(&view))];
         let depth_stencil_attachment = ColoredMeshRenderer::describe_depth_stencil(Some(depth_texture_view));
 
@@ -334,7 +329,7 @@ impl App {
             render_pass.set_pipeline(&self.render_pipeline.pipeline);
             for obj in self.objects.iter() {
                 for mesh in obj.meshes.iter() {
-                    ColoredMeshRenderer::draw_mesh(&mut render_pass, mesh, &camera_uniform.deref().bind_group);
+                    ColoredMeshRenderer::draw_mesh(&mut render_pass, mesh, &camera_uniform.bind_group);
                 }
             }
             self.ui_painter.render(&mut render_pass, &ui_primitives, &self.ui_screen_descriptor);
